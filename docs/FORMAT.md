@@ -50,6 +50,8 @@ root/packages/widgets/<id>.previous/    the version an update replaced, for a ro
 root/packages/apps-index.json           the installed full-screen app packages (2.3; App packages)
 root/packages/apps/<id>/package.yaml    an app package's manifest and WebAssembly (2.3; App packages)
 root/packages/apps/<id>/state/          an app's state and its declared settings (2.3; App packages)
+root/packages/themes-index.json         the installed theme packages (2.3; Theme packages)
+root/packages/themes/<id>/package.yaml  a theme package's manifest and its theme.ini (2.3; Theme packages)
 root/clipboard.qpg                      the lasso's clipboard: what Copy or Cut took (2.0.0-beta.2; The clipboard)
 root/shortcuts.ini                      keyboard and controller mappings the owner edits (2.0; settings.ini)
 root/controller.ini                     controller buttons learned in Settings (2.0; settings.ini)
@@ -1759,6 +1761,13 @@ capabilities are `storage:app-local` and `network:http`; the artifact is still a
 WebAssembly module of at most 32 MiB. Its `state/` folder survives updates and a Remove that keeps
 state, and `state/settings.json` is the host's own settings file.
 
+## Theme packages (2.3)
+
+A theme package is installed as an app is, from the same places, into `packages/themes/<id>/`, listed in
+`packages/themes-index.json` (the apps index's format). Its manifest is `type: theme`, with no `spec` and no
+`capabilities`; its artifact is a `theme.ini` of at most 16 KiB, `key = value` lines of measures Classic's drawing
+takes from it. [THEMES.md](THEMES.md) lists the keys.
+
 A module exports `memory` and `app_draw(width, height, scale_milli, elapsed_ms)`, and may export
 `app_pointer(phase, x, y, source)`, `app_key(code, mods, down)`, `app_status_bar()` and
 `app_stop()`. It imports drawing and the global UI from the `grimoire` module, plus state,
@@ -1799,7 +1808,7 @@ owner's to copy back or delete. Older versions ignore it.
 | `http_port` | the share server's port, 1024 to 65535 (the launcher reads it too, the last such line) |
 | `passcode_told` | 0 or 1: legacy notice flag from releases that paused the Kindle passcode; no longer used by native PIN support (since 1.1.0-beta.1; 1.0.0-beta drops it, and the notice shows once more) |
 | `music_layout` | the last custom music layout built: a paper value (decimal) |
-| `theme` | the theme's id: `gothic`, `classic`, or another theme's (its file in rust/src/looks/) |
+| `theme` | the theme's id: `gothic`, `classic`, another built-in theme's (its file in rust/src/looks/), or an installed theme package's id (docs/THEMES.md). An id no theme has (a package removed by hand, a newer version's theme) draws Gothic and the line is kept as it is |
 | `language` | the language of the screens (since 1.1): `auto` (the default, also when the key is missing: the Kindle's own language if Grimoire speaks it, else English), `en` or `es`. A code this version does not speak (a later one's) acts as `auto` and is written back as it was (below). 1.0.0-beta drops it on its next save, so a language picked in Settings goes back to Automatic |
 | `status_on` | 0 or 1: the small clock and battery in a corner of the notebook page (`status_corner`; a tap there turns it on and off, and it shows on the page only, never on the Library or a sheet; docs/KINDLE.md, The clock and battery corner), on by default, small and top left. Since 2.0.0-beta.5; older versions keep the line as one they do not know |
 | `status_size` | its size, 0 small, 1 medium, 2 large (the Display sheet's row), 1 (medium) by default since 2.0.0-rc.12 (0 before), and clamped to 0..2. Since 2.0.0-beta.5, as `status_on` |

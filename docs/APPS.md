@@ -15,8 +15,8 @@ manifest type (`type: app`) and the runtime.
 
 ## Package Store
 
-The home app row's fourth built-in app is **Package Store**. It is a catalog of apps and widgets
-kept outside Grimoire, in a GitHub repository whose `index.json` names each package's manifest,
+The home app row's fourth built-in app is **Package Store**. It is a catalog of apps, widgets and themes
+([THEMES.md](THEMES.md)) kept outside Grimoire, in a GitHub repository whose `index.json` names each package's manifest,
 artifact, icon, screenshots and description. Opening a package shows its screenshots and metadata,
 then Install downloads the manifest and artifact and runs the package manager's trust prompt,
 license prompt, digest checks and installer. The Store is also where installed packages are

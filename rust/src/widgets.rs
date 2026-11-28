@@ -89,6 +89,7 @@ pub fn widget_icon(name: &str) -> IconKind {
         "live" => IconKind::Live,
         "gamepad" => IconKind::Gamepad,
         "eye" => IconKind::Eye,
+        "style" | "theme" => IconKind::Castle,
         _ => IconKind::Grid,
     }
 }

@@ -18,9 +18,9 @@ waitfor library.apps.icons is 1
 tap library app.store
 wait 400
 expect library.sheet is store
-tap library store.filter.3
+tap library store.filter.4
 wait 300
-expect library.store.filter is 3
+expect library.store.filter is 4
 expect library.store.visible is com.example.fixture
 shot 00-store-installed
 tap library store.close

@@ -9,22 +9,26 @@
 //!   own way. A screen's hook that returns `false` or `None` leaves the screen drawing its own default.
 //!
 //! A new theme: a file here with a `Look`, its line in LOOKS, its `mod` line, and its Style label in the
-//! translations (po/). Its fonts, if it brings any, are listed in font.rs (TTF_*) and assets.rs.
+//! translations (po/). Its fonts, if it brings any, are listed in font.rs (TTF_*) and assets.rs. A theme that only
+//! changes measures can be a package instead (package.rs, docs/THEMES.md): nothing here changes for it.
 
 use crate::font::FaceMap;
 use crate::prelude::*;
 
 pub mod classic;
 mod gothic;
+pub mod package;
 
-/// Every theme, in the order Settings' Style row and the theme shortcut step through them. Gothic first
-/// (the default and Settings.theme 0), Classic second (Settings.theme 1): settings.ini names them by id.
+/// The built-in themes, in the order Settings' Style list and the theme shortcut step through them, before the
+/// installed theme packages (package.rs). Gothic first (the default and Settings.theme 0), Classic second
+/// (Settings.theme 1): settings.ini names them by id.
 pub static LOOKS: &[&dyn Look] = &[
     &gothic::Gothic,
     &classic::Classic,
 ];
 
-/// A theme: an index of LOOKS (Settings.theme's number), settings.ini's `theme=` by its id.
+/// A theme: an index of LOOKS and then of the installed theme packages (Settings.theme's number), settings.ini's
+/// `theme=` by its id. A package's number is its place in the list now: settings.ini keeps its id.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct UiTheme(u8);
 
@@ -33,12 +37,25 @@ impl UiTheme {
     pub const Gothic: UiTheme = UiTheme(0);
     pub const Classic: UiTheme = UiTheme(1);
 
-    /// Every theme, in LOOKS' order.
+    /// How many themes there are, the built-in ones and the installed packages.
+    pub fn count() -> usize {
+        (LOOKS.len() + package::package_look_count()).min(u8::MAX as usize)
+    }
+    /// Every theme, LOOKS' and then the packages'.
     pub fn all() -> impl Iterator<Item = UiTheme> {
-        (0..LOOKS.len() as u8).map(UiTheme)
+        (0..UiTheme::count() as u8).map(UiTheme)
     }
     pub fn look(self) -> &'static dyn Look {
-        LOOKS[self.0 as usize]
+        let i = self.0 as usize;
+        if i < LOOKS.len() {
+            return LOOKS[i];
+        }
+        // (a package removed while it was the theme in use draws as Gothic until Settings is set again)
+        package::package_look(i - LOOKS.len()).map_or(LOOKS[0], |l| l as &dyn Look)
+    }
+    /// Whether the theme comes from an installed package (its name is the package's, untranslated).
+    pub fn is_package(self) -> bool {
+        self.0 as usize >= LOOKS.len()
     }
     /// settings.ini's theme= value
     pub fn id(self) -> &'static str {
@@ -50,14 +67,14 @@ impl UiTheme {
     }
     /// Settings.theme's number back (any other: Gothic, the default)
     pub fn from_i32(v: i32) -> UiTheme {
-        if v >= 0 && (v as usize) < LOOKS.len() { UiTheme(v as u8) } else { UiTheme::Gothic }
+        if v >= 0 && (v as usize) < UiTheme::count() { UiTheme(v as u8) } else { UiTheme::Gothic }
     }
     pub fn from_id(id: &[u8]) -> Option<UiTheme> {
         UiTheme::all().find(|t| t.id().as_bytes() == id)
     }
     /// the theme after this one (Settings' Style row, the theme shortcut)
     pub fn next(self) -> UiTheme {
-        UiTheme((self.0 + 1) % LOOKS.len() as u8)
+        UiTheme(((self.0 as usize + 1) % UiTheme::count()) as u8)
     }
 }
 
@@ -463,11 +480,11 @@ mod tests {
             assert_eq!(UiTheme::from_i32(t.index()), t);
         }
         assert_eq!(UiTheme::from_i32(-1), UiTheme::Gothic);
-        assert_eq!(UiTheme::from_i32(LOOKS.len() as i32), UiTheme::Gothic);
+        assert_eq!(UiTheme::from_i32(UiTheme::count() as i32), UiTheme::Gothic);
         assert_eq!(UiTheme::from_id(b"comic"), None);
         // the shortcut goes round them all
         let mut t = UiTheme::Gothic;
-        for _ in 0..LOOKS.len() {
+        for _ in 0..UiTheme::count() {
             t = t.next();
         }
         assert_eq!(t, UiTheme::Gothic);
@@ -477,7 +494,7 @@ mod tests {
     fn each_theme_is_the_file_named_by_its_id() {
         // (the scenario runner finds the themes to check by these files: tests/scenario_runner.py, l10n)
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/looks");
-        for t in UiTheme::all() {
+        for t in UiTheme::all().filter(|t| !t.is_package()) {
             assert!(dir.join(format!("{}.rs", t.id())).is_file(), "src/looks/{}.rs", t.id());
         }
     }

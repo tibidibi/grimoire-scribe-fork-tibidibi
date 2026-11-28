@@ -6100,6 +6100,13 @@ fn draw_settings(a: &mut App) {
                     settingsmenu::DISPLAY_NO_LIGHT
                 })
             }
+            settingsmenu::Label::Style if ui_theme().is_package() => {
+                label_buf.clear();
+                // TRANSLATORS: (Settings > Display) the Style row while a theme from the Package Store is in use; %s is
+                // the theme's name, as its package names it.
+                csnprintf!(&mut label_buf, 160, tr("Style (%s)"), look().name());
+                &label_buf
+            }
             settingsmenu::Label::Style => tr(look().style_label()),
             settingsmenu::Label::Font => {
                 label_buf.clear();

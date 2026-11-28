@@ -22,6 +22,14 @@ KOReader plugin follows KOReader's own language.
 Corrections and new languages are welcome; see [Translating](Translating). Translations are under
 Grimoire's license, GPL-3.0-or-later.
 
+## Styles
+
+Settings > Display > **Style** lists the looks Grimoire can take: **Gothic** (blackletter and pixel type, pointed
+corners), **Classic** (Terminess or another font below, rounded corners), and any theme installed from the Package
+Store's **Themes** chip. Tap one to use it. A theme from the Store changes Classic's corners, sizes and type; it
+holds no code. Uninstalling the theme in use brings Gothic back. To make one, see
+[docs/THEMES.md](https://github.com/grimoire-notes/grimoire-scribe/blob/main/docs/THEMES.md).
+
 ## Fonts (Classic)
 
 Settings' Display category has a **Font** row in the Classic style, naming the font in use. It

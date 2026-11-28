@@ -1,0 +1,11 @@
+name: Paper Cut
+id: com.example.paper-cut
+version: 1.0.0
+type: theme
+author: Grimoire tests
+description: Classic's type with straight-cut corners.
+license: MIT
+artifact:
+  path: theme.ini
+  sha256: 473cc5da353485e5d603b3a75262f1f4dfbdeaa0305ab94367d10d622803359b
+  size: 215

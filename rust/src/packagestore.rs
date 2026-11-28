@@ -17,6 +17,7 @@ use crate::globalui::{gui_button, gui_button_h, gui_button_row, gui_chip, gui_ch
 use crate::pkgpics::{picture_cached, picture_request, Ask, Cached, PicForm, PicSrc};
 use crate::prelude::*;
 use crate::sha256::sha256_of;
+use crate::themepkg::{theme_package_install, theme_package_installed, theme_package_installed_manifest, theme_package_list, theme_package_remove, theme_package_validate};
 
 /// The catalog this build publishes. A test or a mirror can point `GRIMOIRE_PACKAGE_STORE_URL`
 /// at another `index.json`.
@@ -607,7 +608,7 @@ pub fn store_index_parse(data: &[u8], base: &str) -> Result<StoreIndex, String> 
         let name = jstr(data, toks, it, "name", 160);
         let version = jstr(data, toks, it, "version", 64);
         let kind = jstr(data, toks, it, "type", 16);
-        if !store_id_ok(&id) || name.is_empty() || version.is_empty() || !matches!(kind.as_str(), "app" | "widget") {
+        if !store_id_ok(&id) || name.is_empty() || version.is_empty() || !matches!(kind.as_str(), "app" | "widget" | "theme") {
             continue;
         }
         if index.packages.iter().any(|p| p.id == id) {
@@ -906,9 +907,12 @@ fn pkg_matches(p: &StorePackage, query: &str) -> bool {
         || p.tags.iter().any(|t| t.to_lowercase().contains(&q))
 }
 
+/// The list's chips: All, Apps, Widgets, Themes, then the installed packages.
+const FILTER_INSTALLED: i32 = 4;
+
 fn filtered(ui: &PackageStoreUi) -> Vec<PkgRef> {
     let mut out = Vec::new();
-    if ui.filter == 3 {
+    if ui.filter == FILTER_INSTALLED {
         for (i, p) in ui.installed.iter().enumerate() {
             if pkg_matches(p, &ui.query) {
                 out.push(PkgRef::Installed(i));
@@ -920,6 +924,7 @@ fn filtered(ui: &PackageStoreUi) -> Vec<PkgRef> {
         let kind = match ui.filter {
             1 => p.kind == "app",
             2 => p.kind == "widget",
+            3 => p.kind == "theme",
             _ => true,
         };
         if kind && pkg_matches(p, &ui.query) {
@@ -955,15 +960,11 @@ fn card_ref(n: i32) -> Option<PkgRef> {
 
 /// An installed package as a catalog entry looks, so the list and the detail page show both alike.
 fn installed_package(it: &WidgetInstall, kind: &str) -> StorePackage {
-    let manifest = if kind == "app" {
-        app_package_installed_manifest(&it.id)
-    } else {
-        widget_package_installed_manifest(&it.id)
-    };
+    let manifest = installed_manifest(kind, &it.id);
     let icon = if kind == "widget" {
         if it.icon.trim().is_empty() { IconKind::Grid } else { widget_icon(&it.icon) }
     } else {
-        IconKind::Package
+        kind_glyph(kind)
     };
     StorePackage {
         id: it.id.clone(),
@@ -988,6 +989,9 @@ fn refresh_installed(ui: &mut PackageStoreUi) {
     }
     for it in app_package_list() {
         out.push(installed_package(&it, "app"));
+    }
+    for it in theme_package_list() {
+        out.push(installed_package(&it, "theme"));
     }
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then_with(|| a.id.cmp(&b.id)));
     ui.installed = out;
@@ -1038,11 +1042,11 @@ fn import_dev_folder(dir: &str, w: i32, h: i32) -> Result<(String, String), Stri
         .map(|b| String::from_utf8_lossy(&b).into_owned())
         .ok_or_else(|| format!("{label}: package.yaml could not be read"))?;
     let p = widget_package_parse(&text).map_err(|e| format!("{label}: {e}"))?;
-    if !matches!(p.type_.as_str(), "app" | "widget") {
+    if !matches!(p.type_.as_str(), "app" | "widget" | "theme") {
         return Err(format!("{label}: package.yaml names no package type"));
     }
     let (want_sha, _) = widget_package_artifact_digest(&p);
-    let installed = if p.type_ == "app" { app_package_installed(&p.id) } else { widget_package_installed(&p.id) };
+    let installed = installed_of(&p.type_, &p.id);
     if let Some(it) = installed.as_ref() {
         let rebuilt = it.version == p.version && !it.sha.eq_ignore_ascii_case(want_sha);
         let newer = update_version_cmp(&p.version, &it.version) > 0;
@@ -1072,10 +1076,10 @@ fn import_dev_folder(dir: &str, w: i32, h: i32) -> Result<(String, String), Stri
     // (the source an install records: the repository the package names, when it names one)
     let repository = p.repository.trim();
     let source = if repository.starts_with("https://") { repository.to_string() } else { String::new() };
-    let it = if p.type_ == "app" {
-        app_package_install(&text, &artifact, icon.as_deref(), &source, w, h)
-    } else {
-        widget_package_install(&text, &artifact, &source, w, h)
+    let it = match p.type_.as_str() {
+        "app" => app_package_install(&text, &artifact, icon.as_deref(), &source, w, h),
+        "theme" => theme_package_install(&text, &artifact, &source),
+        _ => widget_package_install(&text, &artifact, &source, w, h),
     }
     .map_err(|e| format!("{label}: {e}"))?;
     qlog!("packages: %s %s imported from %s", &it.name, &it.version, dir);
@@ -1124,7 +1128,46 @@ fn import_development(a: &mut App) {
     import_development_for(&mut a.store, w, h);
     if !a.store.dev_note.is_empty() {
         refresh_installed(&mut a.store);
+        themes_changed(a);
     }
+}
+
+/// The installed themes are read again after one is installed, updated or removed; the theme in use stays the one
+/// it is by its id (Gothic when it was the one removed), and is drawn again from what its package says now.
+fn themes_changed(a: &mut App) {
+    let id = ui_theme().id();
+    crate::looks::package::package_looks_reload();
+    let t = UiTheme::from_id(id.as_bytes()).unwrap_or(UiTheme::Gothic);
+    a.settings.theme = t.index();
+    ui_set_theme(t);
+    crate::userfonts::userfonts_apply(a);
+    httpd_restyle(look().share_pages_gothic());
+    if t.id() != id {
+        settings_save(&a.settings);
+    }
+}
+
+/// An installed package's index entry, by its kind.
+fn installed_of(kind: &str, id: &str) -> Option<WidgetInstall> {
+    match kind {
+        "app" => app_package_installed(id),
+        "theme" => theme_package_installed(id),
+        _ => widget_package_installed(id),
+    }
+}
+
+/// An installed package's manifest, by its kind.
+fn installed_manifest(kind: &str, id: &str) -> Option<WidgetPackage> {
+    match kind {
+        "app" => app_package_installed_manifest(id),
+        "theme" => theme_package_installed_manifest(id),
+        _ => widget_package_installed_manifest(id),
+    }
+}
+
+/// The glyph a package of a kind with no icon of its own is shown with (a theme: Settings' Style row's).
+fn kind_glyph(kind: &str) -> IconKind {
+    if kind == "theme" { IconKind::Castle } else { IconKind::Package }
 }
 
 /// Which package index `id` is in, whether it is installed at all.
@@ -1133,16 +1176,18 @@ fn installed_kind(id: &str) -> Option<&'static str> {
         Some("app")
     } else if widget_package_installed(id).is_some() {
         Some("widget")
+    } else if theme_package_installed(id).is_some() {
+        Some("theme")
     } else {
         None
     }
 }
 
 fn installed_for(p: &StorePackage) -> Option<WidgetInstall> {
-    if p.kind == "app" {
-        app_package_list().into_iter().find(|x| x.id == p.id)
-    } else {
-        widget_package_list().into_iter().find(|x| x.id == p.id)
+    match p.kind.as_str() {
+        "app" => app_package_list().into_iter().find(|x| x.id == p.id),
+        "theme" => theme_package_list().into_iter().find(|x| x.id == p.id),
+        _ => widget_package_list().into_iter().find(|x| x.id == p.id),
     }
 }
 
@@ -1266,7 +1311,8 @@ fn after_repo_manifest(ui: &mut PackageStoreUi, data: &[u8], w: i32, h: i32) {
         let checked = match p.type_.as_str() {
             "app" => app_package_validate(&p, w, h),
             "widget" => widget_package_validate(&p, w, h),
-            _ => Err("The manifest is neither an app nor a widget package.".to_string()),
+            "theme" => theme_package_validate(&p),
+            _ => Err("The manifest is not an app, a widget or a theme package.".to_string()),
         };
         checked.map(|_| p)
     });
@@ -1290,7 +1336,7 @@ fn after_repo_manifest(ui: &mut PackageStoreUi, data: &[u8], w: i32, h: i32) {
     let icon = if p.type_ == "widget" {
         if p.spec.icon.trim().is_empty() { IconKind::Grid } else { widget_icon(&p.spec.icon) }
     } else {
-        IconKind::Package
+        kind_glyph(&p.type_)
     };
     let pkg = StorePackage {
         id: p.id.clone(),
@@ -1359,6 +1405,7 @@ fn validate_for_kind(p: &WidgetPackage, kind: &str, w: i32, h: i32) -> Result<()
     match kind {
         "app" => app_package_validate(p, w, h),
         "widget" => widget_package_validate(p, w, h),
+        "theme" => theme_package_validate(p),
         _ => Err("The Store does not know this package kind.".into()),
     }
 }
@@ -1387,6 +1434,10 @@ fn install_from_pending(a: &mut App, icon: Option<&[u8]>) -> Result<(String, Str
         app_package_install(&manifest, &artifact, icon, &source, a.w, a.h - status_reserved(a))?
     } else if kind == "widget" {
         widget_package_install(&manifest, &artifact, &source, a.w, a.h - status_reserved(a))?
+    } else if kind == "theme" {
+        let it = theme_package_install(&manifest, &artifact, &source)?;
+        themes_changed(a);
+        it
     } else {
         return Err(tr("The Store does not know this package kind.").to_string());
     };
@@ -1405,7 +1456,7 @@ fn install_pending(a: &mut App, icon: Option<&[u8]>) {
             refresh_installed(&mut a.store);
             if repo {
                 a.store.selected = None;
-                a.store.filter = 3;
+                a.store.filter = FILTER_INSTALLED;
                 a.store.query.clear();
                 a.store.page = 0;
                 a.store.view = StoreView::List;
@@ -2078,11 +2129,7 @@ fn installed_license(p: &StorePackage) -> String {
     if installed_kind(&p.id).is_none() {
         return String::new();
     }
-    let m = if p.kind == "app" {
-        app_package_installed_manifest(&p.id)
-    } else {
-        widget_package_installed_manifest(&p.id)
-    };
+    let m = installed_manifest(&p.kind, &p.id);
     m.map(|m| m.license.trim().to_string()).filter(|l| !l.is_empty()).unwrap_or_default()
 }
 
@@ -2145,11 +2192,7 @@ fn open_agree(a: &mut App) {
 /// `license_url`, or the LICENSE file beside the manifest); the license's name shows while it is read.
 fn open_license(a: &mut App) {
     let Some(p) = a.store.selected_package().cloned() else { return };
-    let installed = if p.kind == "app" {
-        app_package_installed_manifest(&p.id)
-    } else {
-        widget_package_installed_manifest(&p.id)
-    };
+    let installed = installed_manifest(&p.kind, &p.id);
     let source = installed_for(&p).map(|it| it.source_url).unwrap_or_default();
     let mut urls = Vec::new();
     match installed.as_ref() {
@@ -2212,10 +2255,10 @@ fn start_next_license(a: &mut App) {
 fn uninstall_selected(a: &mut App) {
     let Some(pkg) = a.store.selected_package().cloned() else { return };
     let kind = installed_kind(&pkg.id).unwrap_or(pkg.kind.as_str());
-    let res = if kind == "app" {
-        app_package_remove(&pkg.id, true)
-    } else {
-        widget_package_remove(&pkg.id, true)
+    let res = match kind {
+        "app" => app_package_remove(&pkg.id, true),
+        "theme" => theme_package_remove(&pkg.id),
+        _ => widget_package_remove(&pkg.id, true),
     };
     match res {
         Ok(()) => {
@@ -2227,13 +2270,15 @@ fn uninstall_selected(a: &mut App) {
                     }
                     ed.widgets.save();
                 }
+            } else if kind == "theme" {
+                themes_changed(a);
             } else if a.app_view.open && a.app_view.id == pkg.id {
                 crate::apphost::apphost_close(a);
             }
             a.store.selected = None;
             a.store.clear_selection();
             refresh_installed(&mut a.store);
-            a.store.filter = 3;
+            a.store.filter = FILTER_INSTALLED;
             a.store.query.clear();
             a.store.page = 0;
             a.store.view = StoreView::List;
@@ -2311,7 +2356,7 @@ fn tapped(a: &mut App, h: Hit) {
             redraw(a);
         }
         H_FILTER => {
-            a.store.filter = clampi(h.arg, 0, 3);
+            a.store.filter = clampi(h.arg, 0, FILTER_INSTALLED);
             a.store.page = 0;
             redraw(a);
         }
@@ -2549,7 +2594,12 @@ fn draw_pager(c: &mut Canvas, ui: &mut PackageStoreUi, area: Rect, page: i32, pa
 }
 
 fn kind_word(p: &StorePackage) -> &'static str {
-    if p.kind == "app" { tr("App") } else { tr("Widget") }
+    match p.kind.as_str() {
+        "app" => tr("App"),
+        // TRANSLATORS: the Package Store's tag on a theme's card (a package that changes how Grimoire looks).
+        "theme" => tr("Theme"),
+        _ => tr("Widget"),
+    }
 }
 
 fn draw_tag(c: &mut Canvas, r: Rect, text: &str, selected: bool) {
@@ -2624,15 +2674,17 @@ fn draw_list(c: &mut Canvas, ui: &mut PackageStoreUi, aw: i32, ah: i32) {
         top += qh + gap;
     }
     let chips_h = gui_chip_h();
-    let labels = [tr("All"), tr("Apps"), tr("Widgets"), tr("Installed")];
+    // TRANSLATORS: the Package Store's chip that lists the themes (Settings > Display > Style lists those installed).
+    let labels = [tr("All"), tr("Apps"), tr("Widgets"), tr("Themes"), tr("Installed")];
+    let n = labels.len() as i32;
     let mut widths = Vec::with_capacity(labels.len());
     for label in &labels {
         widths.push(gui_chip_w(label));
     }
-    let total: i32 = widths.iter().sum::<i32>() + gap * 3;
+    let total: i32 = widths.iter().sum::<i32>() + gap * (n - 1);
     let max_w = (area.w - ui_px(12.0)).max(ui_px(240.0));
     if total > max_w {
-        let each = ((max_w - gap * 3) / 4).max(ui_px(110.0));
+        let each = ((max_w - gap * (n - 1)) / n).max(ui_px(110.0));
         for w in &mut widths {
             *w = each;
         }
@@ -2666,7 +2718,7 @@ fn draw_list(c: &mut Canvas, ui: &mut PackageStoreUi, aw: i32, ah: i32) {
     if vis.is_empty() {
         let msg = if ui.refreshing {
             tr("Reading the Store...").to_string()
-        } else if ui.filter == 3 {
+        } else if ui.filter == FILTER_INSTALLED {
             tr("No packages are installed.").to_string()
         } else if !ui.query.is_empty() {
             tr("No packages match your search.").to_string()
@@ -3018,7 +3070,11 @@ fn draw_trust(c: &mut Canvas, ui: &mut PackageStoreUi, aw: i32, ah: i32) {
         1400,
         // TRANSLATORS: the Package Store's trust page. %s is the package kind (app or widget).
         tr("You MUST trust the author of this package. Grimoire does not review, vet, or verify %s code and is not responsible for any damage, data loss, or malfunction caused by installing or running it."),
-        if p.kind == "app" { "app" } else { "widget" }
+        match p.kind.as_str() {
+            "app" => "app",
+            "theme" => "theme",
+            _ => "widget",
+        }
     );
     let top = area.y + icon_sz + ui_px(34.0);
     let button = Rect::new(area.x, area.y + area.h - ui_px(110.0), area.w, ui_px(100.0));

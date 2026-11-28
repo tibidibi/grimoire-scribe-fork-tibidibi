@@ -130,7 +130,7 @@ spec:
 | `releases` | optional; `version`, `url` (use HTTPS) and `sha256` per entry. Only the entry whose `version` equals the manifest's is used |
 | `spec.runtime` | required; `wasm`. Any other value is refused |
 | `spec.entry` | optional; accepted and ignored. The host calls the exports `widget_draw` and `widget_tap`, not this name |
-| `spec.icon` | optional; one of Grimoire's icons: `calculator`, `package`, `clock`, `timer`/`hourglass`, `music`, `notebook`, `pdf`, `image`/`photo`, `files`/`folder`, `search`, `download`, `language`, `gear`/`settings`, `update`, `paper`/`page`, `library`, `link`, `live`, `gamepad`, `eye`. A `md-` prefix is accepted. An unknown or omitted icon is the widget grid |
+| `spec.icon` | optional; one of Grimoire's icons: `calculator`, `package`, `clock`, `timer`/`hourglass`, `music`, `notebook`, `pdf`, `image`/`photo`, `files`/`folder`, `search`, `download`, `language`, `gear`/`settings`, `update`, `paper`/`page`, `library`, `link`, `live`, `gamepad`, `eye`, `style`/`theme`. A `md-` prefix is accepted. An unknown or omitted icon is the widget grid |
 | `spec.minimizable` | optional, default `true`. Accepted for forward compatibility; this build always draws the frame's minimize button |
 | `spec.size.mode` | `fixed` (default) or `resizable` |
 | `spec.size.default` | optional; `[width, height]` at 300 dpi, default `[220, 160]`, within the same bounds as `min` and `max` |

@@ -15,6 +15,28 @@ use crate::sha256::sha256_of;
 pub const APP_PKG_INDEX: &str = "packages/apps-index.json";
 pub const APP_PKG_DIR: &str = "packages/apps";
 pub const APP_PKG_COUNT_MAX: usize = 64;
+
+/// A package kind that is installed as apps are (apps here, themes in themepkg.rs): its folder, its index, how many
+/// may be installed, and its word in the messages.
+pub(crate) struct PkgKind {
+    pub type_: &'static str,
+    pub dir: &'static str,
+    pub index: &'static str,
+    pub count_max: usize,
+    pub what: &'static str,
+}
+
+impl PkgKind {
+    pub fn dir_of(&self, id: &str) -> String {
+        format!("{}/{}/{id}", root(), self.dir)
+    }
+    pub fn index_path(&self) -> String {
+        format!("{}/{}", root(), self.index)
+    }
+}
+
+pub(crate) const APP_KIND: PkgKind =
+    PkgKind { type_: "app", dir: APP_PKG_DIR, index: APP_PKG_INDEX, count_max: APP_PKG_COUNT_MAX, what: "app" };
 /// A bundled app icon is one small `.ico`; its pixels are decoded by the safe loader's picture worker (pkgpics.rs,
 /// issue #236), never here or in appicon.rs.
 pub const APP_ICON_MAX: usize = 256 * 1024;
@@ -26,11 +48,11 @@ fn root() -> String {
 }
 
 pub fn app_package_dir(id: &str) -> String {
-    format!("{}/{}/{id}", root(), APP_PKG_DIR)
+    APP_KIND.dir_of(id)
 }
 
 pub fn app_package_index_path() -> String {
-    format!("{}/{APP_PKG_INDEX}", root())
+    APP_KIND.index_path()
 }
 
 fn now_secs() -> i64 {
@@ -134,8 +156,38 @@ fn forget_icon_picture(it: &WidgetInstall) {
 /// Validates an app manifest for this build and device. `canvas_w`/`canvas_h` are accepted for the
 /// package manager's shared call shape; an app owns the whole screen and has no size in its spec.
 pub fn app_package_validate(p: &WidgetPackage, _canvas_w: i32, _canvas_h: i32) -> Result<(), String> {
-    if p.type_ != "app" {
-        return Err("This repository is not an app package".into());
+    package_validate_common(p, &APP_KIND)?;
+    for c in &p.capabilities {
+        if !cap_ok(c) {
+            return Err(format!("Unknown app capability '{c}'."));
+        }
+    }
+    if p.spec.runtime != "wasm" {
+        return Err("`spec.runtime` must be `wasm`; Grimoire does not run native app code".into());
+    }
+    let icon = p.spec.icon.trim();
+    if app_icon_is_file(icon) {
+        if !path_ok(icon) || icon == "package.yaml" || in_state(icon) || icon == p.artifact.path {
+            return Err("`spec.icon` is not a safe relative path for the app's icon".into());
+        }
+        if !sha_ok(&p.spec.icon_sha256) {
+            return Err("`spec.icon_sha256` is not a SHA-256 digest".into());
+        }
+        if p.spec.icon_size == 0 || p.spec.icon_size > APP_ICON_MAX as u64 {
+            return Err("`spec.icon_size` is outside the allowed size".into());
+        }
+    } else if !p.spec.icon_sha256.trim().is_empty() || p.spec.icon_size != 0 {
+        return Err("`spec.icon_sha256` and `spec.icon_size` are only for a `.ico` icon".into());
+    }
+    Ok(())
+}
+
+/// What every package installed as an app is (an app's or a theme's manifest): its type, id, texts, versions,
+/// platforms, artifact and releases.
+pub(crate) fn package_validate_common(p: &WidgetPackage, k: &PkgKind) -> Result<(), String> {
+    let what = k.what;
+    if p.type_ != k.type_ {
+        return Err(format!("This repository is not {} {what} package", if what.starts_with('a') { "an" } else { "a" }));
     }
     if p.id.ends_with(WIDGET_ID_PREVIOUS) {
         return Err("`id` cannot end in `.previous`; an update keeps the replaced version's folder under that name".into());
@@ -160,7 +212,7 @@ pub fn app_package_validate(p: &WidgetPackage, _canvas_w: i32, _canvas_h: i32) -
             return Err("`min_grimoire_version` is not a valid version".into());
         }
         if update_version_cmp(GRIMOIRE_VERSION, &p.min_grimoire_version) < 0 {
-            return Err(format!("This app needs Grimoire {} or newer.", p.min_grimoire_version));
+            return Err(format!("This {what} needs Grimoire {} or newer.", p.min_grimoire_version));
         }
     }
     if p.platforms.is_empty() {
@@ -175,29 +227,7 @@ pub fn app_package_validate(p: &WidgetPackage, _canvas_w: i32, _canvas_h: i32) -
     if !p.platforms.iter().any(|x| x == "all") && !widget_platform_supported(&p.platforms) {
         let current = widget_current_platform();
         let label = if current == "unknown" { "this device".to_string() } else { widget_platform_label(current).to_string() };
-        return Err(format!("This app does not support your device ({label})."));
-    }
-    for c in &p.capabilities {
-        if !cap_ok(c) {
-            return Err(format!("Unknown app capability '{c}'."));
-        }
-    }
-    if p.spec.runtime != "wasm" {
-        return Err("`spec.runtime` must be `wasm`; Grimoire does not run native app code".into());
-    }
-    let icon = p.spec.icon.trim();
-    if app_icon_is_file(icon) {
-        if !path_ok(icon) || icon == "package.yaml" || in_state(icon) || icon == p.artifact.path {
-            return Err("`spec.icon` is not a safe relative path for the app's icon".into());
-        }
-        if !sha_ok(&p.spec.icon_sha256) {
-            return Err("`spec.icon_sha256` is not a SHA-256 digest".into());
-        }
-        if p.spec.icon_size == 0 || p.spec.icon_size > APP_ICON_MAX as u64 {
-            return Err("`spec.icon_size` is outside the allowed size".into());
-        }
-    } else if !p.spec.icon_sha256.trim().is_empty() || p.spec.icon_size != 0 {
-        return Err("`spec.icon_sha256` and `spec.icon_size` are only for a `.ico` icon".into());
+        return Err(format!("This {what} does not support your device ({label})."));
     }
     // (the one rule for a package's module, widgetpkg.rs: a relative path inside the package's folder, neither the
     // manifest nor anything of `state/` in any case of their letters, of names the storage walk takes)
@@ -241,6 +271,10 @@ fn json_escape(s: &str, out: &mut String) {
 }
 
 pub fn app_package_index_save(items: &[WidgetInstall]) -> i32 {
+    pkg_index_save(&APP_KIND, items)
+}
+
+pub(crate) fn pkg_index_save(k: &PkgKind, items: &[WidgetInstall]) -> i32 {
     if root().is_empty() {
         return 0;
     }
@@ -271,7 +305,7 @@ pub fn app_package_index_save(items: &[WidgetInstall]) -> i32 {
     }
     s.push_str("\n  ]\n}\n");
     mkdir_p(&format!("{}/packages", root()));
-    write_file_atomic(&app_package_index_path(), s.as_bytes())
+    write_file_atomic(&k.index_path(), s.as_bytes())
 }
 
 fn json_get_str(text: &[u8], toks: &[JsonTok], obj: i32, key: &str) -> String {
@@ -288,13 +322,17 @@ fn json_get_str(text: &[u8], toks: &[JsonTok], obj: i32, key: &str) -> String {
 }
 
 pub fn app_package_index_load() -> Vec<WidgetInstall> {
-    let Some(data) = read_file_max(&app_package_index_path(), 256 * 1024) else {
+    pkg_index_load(&APP_KIND)
+}
+
+pub(crate) fn pkg_index_load(k: &PkgKind) -> Vec<WidgetInstall> {
+    let Some(data) = read_file_max(&k.index_path(), 256 * 1024) else {
         return Vec::new();
     };
     let mut toks = vec![JsonTok::default(); 4096];
     let n = json_parse(&data, &mut toks);
     if n < 0 {
-        qlog!("apps: apps-index.json did not parse");
+        qlog!("packages: %s did not parse", k.index);
         return Vec::new();
     }
     let toks = &toks[..n as usize];
@@ -303,7 +341,7 @@ pub fn app_package_index_load() -> Vec<WidgetInstall> {
         return Vec::new();
     }
     let mut out = Vec::new();
-    for i in 0..toks[arr as usize].size.min(APP_PKG_COUNT_MAX as i32) {
+    for i in 0..toks[arr as usize].size.min(k.count_max as i32) {
         let it = json_item(toks, arr, i);
         if it < 0 || toks[it as usize].type_ != JsonType::Object {
             continue;
@@ -399,15 +437,36 @@ pub fn app_package_install(manifest: &str, artifact: &[u8], icon: Option<&[u8]>,
     } else {
         None
     };
-    let index = app_package_index_load();
-    if index.len() >= APP_PKG_COUNT_MAX && !index.iter().any(|x| x.id == p.id) {
-        return Err("No more app packages can be installed.".into());
+    if let Some(was) = app_package_installed(&p.id) {
+        forget_icon_picture(&was);
     }
-    let dir = app_package_dir(&p.id);
-    let stage = format!("{}/{}/.install-{}", root(), APP_PKG_DIR, std::process::id());
+    let icon = icon_bytes.map(|b| (p.spec.icon.trim(), b));
+    pkg_install_files(&APP_KIND, &p, manifest, artifact, &got, icon, p.spec.icon.trim(), source_url)
+}
+
+/// Puts a checked package in place: its manifest, its artifact (whose SHA-256 is `sha`) and an icon file, staged
+/// then swapped in whole; the replaced version's folder is kept as `.previous` and its `state` carried over; then the
+/// kind's index. The caller has validated the manifest and checked the artifact's size and digest.
+pub(crate) fn pkg_install_files(
+    k: &PkgKind,
+    p: &WidgetPackage,
+    manifest: &str,
+    artifact: &[u8],
+    sha: &str,
+    icon_bytes: Option<(&str, &[u8])>,
+    icon_name: &str,
+    source_url: &str,
+) -> Result<WidgetInstall, String> {
+    let what = k.what;
+    let index = pkg_index_load(k);
+    if index.len() >= k.count_max && !index.iter().any(|x| x.id == p.id) {
+        return Err(format!("No more {what} packages can be installed."));
+    }
+    let dir = k.dir_of(&p.id);
+    let stage = format!("{}/{}/.install-{}", root(), k.dir, std::process::id());
     let _ = std::fs::remove_dir_all(&stage);
     if std::fs::create_dir_all(&stage).is_err() {
-        return Err("Could not make the app's folder.".into());
+        return Err(format!("Could not make the {what}'s folder."));
     }
     if write_file_atomic(&format!("{stage}/package.yaml"), manifest.as_bytes()) != 0 {
         let _ = std::fs::remove_dir_all(&stage);
@@ -424,8 +483,8 @@ pub fn app_package_install(manifest: &str, artifact: &[u8], icon: Option<&[u8]>,
         let _ = std::fs::remove_dir_all(&stage);
         return Err("Could not write the artifact.".into());
     }
-    if let Some(bytes) = icon_bytes {
-        let icon_dest = format!("{stage}/{}", p.spec.icon.trim());
+    if let Some((icon, bytes)) = icon_bytes {
+        let icon_dest = format!("{stage}/{icon}");
         if let Some(parent) = icon_dest.rsplit_once('/').map(|(d, _)| d) {
             if std::fs::create_dir_all(parent).is_err() {
                 let _ = std::fs::remove_dir_all(&stage);
@@ -434,14 +493,11 @@ pub fn app_package_install(manifest: &str, artifact: &[u8], icon: Option<&[u8]>,
         }
         if write_file_atomic(&icon_dest, bytes) != 0 {
             let _ = std::fs::remove_dir_all(&stage);
-            return Err("Could not write the app's icon.".into());
+            return Err(format!("Could not write the {what}'s icon."));
         }
     }
     let old = format!("{dir}{WIDGET_ID_PREVIOUS}");
     let _ = std::fs::remove_dir_all(&old);
-    if let Some(was) = index.iter().find(|x| x.id == p.id) {
-        forget_icon_picture(was);
-    }
     if std::fs::metadata(&dir).is_ok() && std::fs::rename(&dir, &old).is_err() {
         let _ = std::fs::remove_dir_all(&stage);
         return Err("Could not move the installed version aside.".into());
@@ -451,7 +507,7 @@ pub fn app_package_install(manifest: &str, artifact: &[u8], icon: Option<&[u8]>,
             let _ = std::fs::rename(&old, &dir);
         }
         let _ = std::fs::remove_dir_all(&stage);
-        return Err(format!("Could not put the app in place: {e}"));
+        return Err(format!("Could not put the {what} in place: {e}"));
     }
     if std::fs::metadata(format!("{old}/state")).is_ok() {
         let _ = std::fs::rename(format!("{old}/state"), format!("{dir}/state"));
@@ -462,15 +518,15 @@ pub fn app_package_install(manifest: &str, artifact: &[u8], icon: Option<&[u8]>,
         version: p.version.clone(),
         author: p.author.clone(),
         description: p.description.clone(),
-        icon: p.spec.icon.trim().to_string(),
-        path: format!("{}/{}/{}", APP_PKG_DIR, p.id, p.artifact.path),
-        sha: got,
+        icon: icon_name.to_string(),
+        path: format!("{}/{}/{}", k.dir, p.id, p.artifact.path),
+        sha: sha.to_string(),
         installed_at: now_secs(),
         source_url: source_url.to_string(),
     };
     let mut next: Vec<WidgetInstall> = index.into_iter().filter(|x| x.id != it.id).collect();
     next.push(it.clone());
-    if app_package_index_save(&next) != 0 {
+    if pkg_index_save(k, &next) != 0 {
         if std::fs::metadata(format!("{dir}/state")).is_ok() {
             let _ = std::fs::rename(format!("{dir}/state"), format!("{old}/state"));
         }
@@ -478,7 +534,7 @@ pub fn app_package_install(manifest: &str, artifact: &[u8], icon: Option<&[u8]>,
         if std::fs::metadata(&old).is_ok() {
             let _ = std::fs::rename(&old, &dir);
         }
-        return Err("Could not save the app index.".into());
+        return Err(format!("Could not save the {what} index."));
     }
     Ok(it)
 }
@@ -488,14 +544,23 @@ pub fn app_package_remove(id: &str, keep_state: bool) -> Result<(), String> {
     if !id_ok(id) {
         return Err("That id is not an app package's.".into());
     }
-    let dir = app_package_dir(id);
     if let Some(was) = app_package_installed(id) {
         forget_icon_picture(&was);
     }
+    pkg_remove(&APP_KIND, id, keep_state)
+}
+
+/// Removes an installed package of kind k and its files (its `state` folder kept when `keep_state` is set), then its
+/// line of the kind's index.
+pub(crate) fn pkg_remove(k: &PkgKind, id: &str, keep_state: bool) -> Result<(), String> {
+    if !id_ok(id) {
+        return Err(format!("That id is not {} {} package's.", if k.what.starts_with('a') { "an" } else { "a" }, k.what));
+    }
+    let dir = k.dir_of(id);
     if keep_state {
         let state = format!("{dir}/state");
         if std::fs::metadata(&state).is_ok() {
-            let keep = format!("{}/{}/.state-{}", root(), APP_PKG_DIR, std::process::id());
+            let keep = format!("{}/{}/.state-{}", root(), k.dir, std::process::id());
             let _ = std::fs::remove_dir_all(&keep);
             std::fs::rename(&state, &keep).ok();
             let _ = std::fs::remove_dir_all(&dir);
@@ -508,10 +573,10 @@ pub fn app_package_remove(id: &str, keep_state: bool) -> Result<(), String> {
     } else {
         let _ = std::fs::remove_dir_all(&dir);
     }
-    let mut index = app_package_index_load();
+    let mut index = pkg_index_load(k);
     index.retain(|p| p.id != id);
-    if app_package_index_save(&index) != 0 {
-        return Err("Could not save the app index.".into());
+    if pkg_index_save(k, &index) != 0 {
+        return Err(format!("Could not save the {} index.", k.what));
     }
     Ok(())
 }

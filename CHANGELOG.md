@@ -118,6 +118,14 @@
   Isometric 136 and Hexagon 119. Seyes rule, Blank and the music papers are unchanged. After the update a page kept
   drawn to open quickly is drawn once more, so it shows the new lines, and so are a notebook's previews in the
   Pages view as the view opens and its card in the Library as the notebook is next opened and left.
+- **Themes are a list, and the Package Store has themes** (#185, #212, tibidibi). Settings > Display > Style opens a
+  list of the themes, as Language does, instead of switching between Gothic and Classic with each tap. Each
+  built-in theme is one file of its own (rust/src/looks/), and the screens and the kit's global elements ask the
+  theme in use how to draw rather than checking for Gothic, with no change to how Gothic and Classic look. A theme
+  can also come as a package: the Store's new Themes chip lists them, an installed one is in the Style list after
+  the built-in ones, and removing the theme in use brings Gothic back. A theme package carries no code, only a
+  theme.ini of measures (rounded or cut corners, their radii, Classic's or Gothic's type, title sizes, labels in
+  capitals and a few more) that Classic's drawing takes; docs/THEMES.md says how to make one.
 - Housekeeping: the Buttons and Gestures lists offer an action only where it acts (#282). On a platform kept in
   another crate whose system owns sleep (rust/PORTING.md), the Sleep settings page has one switch, Keep the screen
   on while Grimoire is open, the sleep screen is the page, and Sleep now, Sleep screen and Sleep after are not

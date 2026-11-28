@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Grimoire 1.0.0-beta\n"
 "Report-Msgid-Bugs-To: https://github.com/ganten1998/grimoire-scribe/issues\n"
-"POT-Creation-Date: 2026-11-27 18:04+0100\n"
+"POT-Creation-Date: 2026-11-28 11:26+0100\n"
 "PO-Revision-Date: 2026-10-20 08:02-0500\n"
 "Last-Translator: draft\n"
 "Language-Team: Spanish\n"
@@ -3201,6 +3201,7 @@ msgstr "No se pudo guardar el cambio."
 msgid "Show All"
 msgstr "Mostrar"
 
+#. TRANSLATORS: the Package Store's chip that lists the themes (Settings > Display > Style lists those installed).
 #: rust/src/library.rs rust/src/mapview.rs rust/src/packagestore.rs
 msgid "All"
 msgstr "Todo"
@@ -4093,6 +4094,13 @@ msgstr "Automático (%s)"
 #: rust/src/library.rs
 msgid "Exit"
 msgstr "Salir"
+
+#. TRANSLATORS: (Settings > Display) the Style row while a theme from the Package Store is in use; %s is
+#. the theme's name, as its package names it.
+#: rust/src/library.rs
+#, c-format
+msgid "Style (%s)"
+msgstr "Estilo (%s)"
 
 #. TRANSLATORS: (Settings, Classic only) the row that opens the Font sheet, with the font in use
 #. by its short name, never translated ("Terminess", "Atkinson", "Noto Sans", "Literata"; one of
@@ -5190,6 +5198,11 @@ msgstr ""
 msgid "App"
 msgstr "abr"
 
+#. TRANSLATORS: the Package Store's tag on a theme's card (a package that changes how Grimoire looks).
+#: rust/src/packagestore.rs
+msgid "Theme"
+msgstr "Tema"
+
 #: rust/src/packagestore.rs
 msgid "Widget"
 msgstr ""
@@ -5203,6 +5216,10 @@ msgstr "Gestos"
 #, fuzzy
 msgid "Search:"
 msgstr "Buscar"
+
+#: rust/src/packagestore.rs
+msgid "Themes"
+msgstr "Temas"
 
 #: rust/src/packagestore.rs
 msgid "No packages are installed."
